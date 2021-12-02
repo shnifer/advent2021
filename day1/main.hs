@@ -14,4 +14,4 @@ solve1 xs = length $ filter (uncurry (>)) steps
 
 solve2 :: [Int] -> Int
 solve2 xs = solve1 windows
-    where windows = map (sum.take 3) . filter ((>2).length) . tails $ xs
+    where windows = map (sum.take 3). take (length xs - 3). tails $ xs
