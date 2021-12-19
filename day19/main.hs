@@ -3,6 +3,7 @@ import Data.Function
 import Data.Maybe
 import Debug.Trace
 import qualified Data.Set as S
+import Control.Parallel.Strategies
 
 type V3 = (Int,Int,Int)
 type Part = [V3]
@@ -57,7 +58,8 @@ completeStep::[[SPart]] -> [SPart] -> [Int] -> Int -> ([SPart], [Int])
 completeStep allRotParts rdyParts rdyInds frontSize = let
     pretInds = [0..length allRotParts -1 ] \\ rdyInds :: [Int]
     goods = nubOrdOn (fst) $ map (\(i,mv)->(i, fromJust mv)).filter (isJust.snd) $
-            [ (pretInd, commons rdy rotPret) |
+            withStrategy (parList rdeepseq) $
+                [ (pretInd, commons rdy rotPret) |
                 rdy<-take frontSize rdyParts,
                 pretInd<-pretInds,
                 let rotPret = allRotParts!!pretInd] :: [(Int, SPart)]
