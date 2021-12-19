@@ -2,18 +2,24 @@ import Data.List.Extra
 import Data.Function
 import Data.Maybe
 import Debug.Trace
+import qualified Data.Set as S
 
 type V3 = (Int,Int,Int)
 type Part = [V3]
+type SPart = S.Set V3
 type Rot = Int
 
 main::IO ()
 main = do
     dat <- getInput
     let res = complete dat
-    print $ solve1 res
-    print $ solve2 dat res
+    let resS = completeS dat
+--    print $ solve1 res
+--    print $ solve2 dat res
+    print $ solve1S resS
+    print $ solve2S dat resS
 
+solve1::[(Part,Int)] -> Int
 solve1 = length.nub.concat.map fst
 
 solve2 dat res = let
@@ -39,37 +45,87 @@ findDelta a r = let
     ((xa,ya,za),(xr,yr,zr)) = (minimum a, minimum r)
     delta = (xr-xa, yr-ya, zr-za)
     moved = movePart a delta
-    in if moved == r then Just delta else Nothing
+    in if sort moved == sort r then Just delta else Nothing
 
-complete::[Part] -> [(Part,Int)]
-complete parts = let (ps,is) = completeStep parts [parts!!0] [0] 1
+solve2S::[Part] -> [(SPart,Int)] -> Int
+solve2S dat res = let
+    ordPs = map (S.toList.fst) $ sortOn snd res
+    pivots = allPivots dat ordPs
+    allDist = [manhL a b | a<-pivots, b<-pivots]
+    in maximum allDist
+
+solve1S::[(SPart,Int)] -> Int
+solve1S = S.size.(S.unions).map fst
+
+part2SPart::Part->SPart
+part2SPart p = S.fromList p
+
+completeS::[Part] -> [(SPart,Int)]
+completeS parts = let
+    rotedParts = map (map snd.allRots) parts
+    sRotedParts = (map.map) part2SPart rotedParts
+    (ps,is) = completeStepS sRotedParts [head.head $ sRotedParts] [0] 1
     in zip ps is
 
-completeStep::[Part] -> [Part] -> [Int] -> Int -> ([Part], [Int])
-completeStep allParts rdyParts rdyInds frontSize = let
-    pretInds = [0..length allParts -1 ] \\ rdyInds :: [Int]
+completeStepS::[[SPart]] -> [SPart] -> [Int] -> Int -> ([SPart], [Int])
+completeStepS allRotParts rdyParts rdyInds frontSize = let
+    pretInds = [0..length allRotParts -1 ] \\ rdyInds :: [Int]
     goods = nubOrdOn (fst) $ map (\(i,mv)->(i, fromJust mv)).filter (isJust.snd) $
-            [ (pretInd, commons rdy pret) |
+            [ (pretInd, commonsS rdy rotPret) |
                 rdy<-take frontSize rdyParts,
                 pretInd<-pretInds,
-                let pret = allParts!!pretInd] :: [(Int, [V3])]
+                let rotPret = allRotParts!!pretInd] :: [(Int, SPart)]
     goodInds = map fst goods
     goodParts = map snd goods
     in trace ("added "++show goodInds) $ if null goods then (rdyParts, rdyInds)
-       else completeStep allParts (goodParts ++ rdyParts ) (goodInds ++ rdyInds) (length goodInds)
+       else completeStepS allRotParts (goodParts ++ rdyParts ) (goodInds ++ rdyInds) (length goodInds)
 
-commons::Part -> Part -> Maybe Part
-commons p1 p2 = let
-    rots = map snd $ allRots p2 :: [Part]
+commonsS::SPart -> [SPart] -> Maybe SPart
+commonsS p1 rots = let
+    matches = map (commonsMovedS p1) rots :: [Maybe SPart]
+    in firstJust id matches
+
+commonsMovedS::SPart -> SPart -> Maybe SPart
+commonsMovedS p1 p2 = let
+    deltas = map (\((x1,y1,z1),(x2,y2,z2))-> (x1-x2,y1-y2,z1-z2)) $ S.toList $ S.cartesianProduct p1 p2
+    variants = map (movePartS p2) deltas :: [SPart]
+    intersects = map (S.size.(p1 `S.intersection`)) variants `zip` variants :: [(Int, SPart)]
+    goods = filter ((>=12).fst) intersects
+    in if null goods then Nothing else Just (snd.head $ goods)
+
+movePartS::SPart -> V3 -> SPart
+movePartS sp (dx,dy,dz) = S.map (\(x,y,z)->(x+dx,y+dy,z+dz)) sp
+
+complete::[Part] -> [(Part,Int)]
+complete parts = let
+    rotedParts = map (map snd.allRots) parts
+    (ps,is) = completeStep rotedParts [parts!!0] [0] 1
+    in zip ps is
+
+completeStep::[[Part]] -> [Part] -> [Int] -> Int -> ([Part], [Int])
+completeStep allRotParts rdyParts rdyInds frontSize = let
+    pretInds = [0..length allRotParts -1 ] \\ rdyInds :: [Int]
+    goods = nubOrdOn (fst) $ map (\(i,mv)->(i, fromJust mv)).filter (isJust.snd) $
+            [ (pretInd, commons rdy rotPret) |
+                rdy<-take frontSize rdyParts,
+                pretInd<-pretInds,
+                let rotPret = allRotParts!!pretInd] :: [(Int, [V3])]
+    goodInds = map fst goods
+    goodParts = map snd goods
+    in trace ("added "++show goodInds) $ if null goods then (rdyParts, rdyInds)
+       else completeStep allRotParts (goodParts ++ rdyParts ) (goodInds ++ rdyInds) (length goodInds)
+
+commons::Part -> [Part] -> Maybe Part
+commons p1 rots = let
     matches = map (commonsMoved p1) rots :: [Maybe Part]
     in firstJust id matches
 
 commonsMoved::Part -> Part -> Maybe Part
 commonsMoved p1 p2 = let
-    deltas = nub $ [(x1-x2,y1-y2,z1-z2) | (x1,y1,z1)<-p1, (x2,y2,z2)<-p2]
+    deltas = [(x1-x2,y1-y2,z1-z2) | (x1,y1,z1)<-p1, (x2,y2,z2)<-p2]
     variants = map (movePart p2) deltas :: [Part]
-    intersects = map (p1 `intersect`) variants `zip` variants :: [([V3], Part)]
-    goods = filter (\(cp,_) -> length cp >=12) intersects
+    intersects = map (length.(p1 `intersect`)) variants `zip` variants :: [(Int, Part)]
+    goods = filter ((>=12).fst) intersects
     in if null goods then Nothing else Just (snd.head $ goods)
 
 getInput = getFile "input.txt"
